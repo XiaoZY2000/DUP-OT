@@ -1,2 +1,11 @@
 dataset/CDs_and_Vinyl/*
 !dataset/CDs_and_Vinyl/.gitkeep
+
+dataset/Digital_Music/*
+!dataset/Digital_Music/.gitkeep
+
+dataset/Movies_and_TV/*
+!dataset/Movies_and_TV/.gitkeep
+
+dataset/Video_Games/*
+!dataset/Video_Games/.gitkeep
