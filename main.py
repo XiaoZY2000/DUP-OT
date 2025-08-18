@@ -47,8 +47,8 @@ def main():
     nltk.download('punkt')
     nltk.download('punkt_tab')
     for dataset in dataset_list:
-        # 读取文件
-        # data = {"user_interaction": {user1: {item1: {"review": , "rating": 5, "unixReviewTime": 1407024000}, ...}, ...}, "item_description": {item1: "Title + Description", ...}}
+        # Read the dataset from the JSON file
+        # data = {"interaction": {user1: {item1: {"review": , "rating": 5}, ...}, ...}, "metadata": {item1: {"description": "Title + Description", "images"}, ...}}
         filepath = './dataset/' + dataset + '.json'
         
         with open(filepath, 'r') as file:

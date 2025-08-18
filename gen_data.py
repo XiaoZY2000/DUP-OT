@@ -1,105 +1,83 @@
 import pandas as pd
-import gzip
 import json
 import os
 from tqdm import tqdm
 import re
 import html
 
-# 解压文件
-def parse(path):
-    g = gzip.open(path, 'rb')#以二进制形式打开路径的文件
-    for l in g:
-        yield json.loads(l)
-
-def getDF(path):
-    i = 0
-    df = {}#创建空字典
-    for d in tqdm(parse(path), desc="Reading file"):
-        df[i] = d
-        i += 1
-    return pd.DataFrame.from_dict(df, orient='index')
-
 def clean_text(text):
-    # 转换HTML实体字符
+    # Remove HTML entities
     text = html.unescape(text)
-    # 去除 HTML 标签
+    # Remove HTML tags
     text = re.sub(r'<[^>]+>', '', text)
-    # 去除竖线分隔符
+    # Remove URLs
     text = re.sub(r'\|', '', text)
-    # 去除列表符号，如 [] 和 []
+    # Remove special characters and punctuation
     text = re.sub(r'\[.*?\]', '', text)
-    # 去除额外的引号
+    # Remove non-alphanumeric characters except spaces
     text = re.sub(r"['\"]", '', text)
-    # 去除多余的空格
+    # Remove extra spaces
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
 def get_data(dataset, rewrite=True):
     cur_path = os.path.dirname(__file__)
-    reviewData = dataset + ".json.gz"
+    reviewData = dataset + ".jsonl"
     review_path = os.path.join(cur_path, "dataset", dataset, reviewData)
     metaData = "meta_" + reviewData
     meta_path = os.path.join(cur_path, "dataset", dataset, metaData)
-    review_json = dataset + ".json"
-    meta_json = "meta_" + review_json
-    review_json_path = os.path.join(cur_path, "dataset", dataset, review_json)
-    meta_json_path = os.path.join(cur_path, "dataset", dataset, meta_json)
 
-    # 获得DataFrame类型的数据
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    DF_review = getDF(review_path)
-    DF_meta = getDF(meta_path)
+    # Get the data
+    DF_review = pd.read_json(review_path, lines=True)
+    print("Review Data Loaded")
+    DF_meta = pd.read_json(meta_path, lines=True)
+    print("Meta Data Loaded")
+    DF_review_dict = (
+    DF_review.groupby('user_id')
+      .apply(lambda g: g.drop(columns='user_id').to_dict(orient='records'))
+      .to_dict()
+)
+    print("User Data Transformed to Dictionary")
 
-    DF_meta = DF_meta.drop_duplicates(subset=['asin'])
-    DF_meta_dict = DF_meta.set_index('asin').to_dict(orient='index')
+    DF_meta = DF_meta.drop_duplicates(subset=['parent_asin'])
+    DF_meta_dict = DF_meta.set_index('parent_asin').to_dict(orient='index') # Turn into a dictionary for faster access
 
-    # 根据交互数据构建图
-    # 构建结点信息
-    user_item_mapping = DF_review.groupby('reviewerID')['asin'].apply(list).to_dict()
-    user_item_mapping = {user: [item for item in items] for user, items in user_item_mapping.items() if len(items) >= 10}
-    print("user数量：",len(list(user_item_mapping.keys())))
+    print("Item Data Transformed to Dictionary")
     
-    user_ids = list(user_item_mapping.keys())
-    user_item_preference_dict = {}
-    for user in tqdm(user_ids, desc="Processing Users"):
-        user_item_preference_dict[user] = {}
-        for row in DF_review.loc[DF_review['reviewerID'] == user].itertuples():
-            item_data = DF_meta_dict.get(row.asin, {})
-            title = item_data.get('title', 'No Title Information')
-            description = ' '.join(item_data.get('description', ['No Description Information.']))
-            if row.reviewText:
-                review = str(row.reviewText)
-            else:
-                review = "No Review Information."
-            if row.overall:
-                rating = float(row.overall)
-            else:
-                rating = 3.0
-            if row.unixReviewTime:
-                review_time = int(row.unixReviewTime)
-            else:
-                review_time = 0
-            item_review = 'Item Title: ' + title + '; Item Description: ' + description + '; User\'s Review: ' + review
-            item_review = clean_text(item_review)
-            user_item_preference_dict[user][str(row.asin)] = {}
-            user_item_preference_dict[user][str(row.asin)]["review"] = item_review
-            user_item_preference_dict[user][str(row.asin)]["rating"] = rating
-            user_item_preference_dict[user][str(row.asin)]["unixReviewTime"] = review_time
+    interaction_dict = {}
 
-    item_ids = list(set(item for sublist in user_item_mapping.values() for item in sublist))
-    item_description_dict = {}
+    for user_id, reviews in tqdm(DF_review_dict.items(), desc="Processing Reviews"):
+        for review in reviews:
+            item_id = review.get('parent_asin')
+            if item_id is not None:
+                if not (review['rating'] and review['text']): # Filter out empty reviews
+                    continue
+                interaction_dict[user_id] = {}
+                interaction_dict[user_id][item_id] = {'review': clean_text(review.get('title', '') + ': ' + review['text']),
+                                                      'rating': float(review['rating'])}
+    
+    # Item ids after filtering
+    item_ids = set([item for user_interactions in interaction_dict.values() for item in user_interactions.keys()])
+
+    item_metadata_dict = {}
     for item in tqdm(item_ids, desc="Processing Items"):
         item_data = DF_meta_dict.get(item, {})
-        title = item_data.get('title', 'No Title Information')
-        description = ' '.join(item_data.get('description', ['No Description Information']))
-        overall_description = 'Item Title: ' + title + '; Item Description: ' + description
+        if not item_data:
+            continue
+        title = item_data.get('title', '')
+        description = ' '.join(item_data.get('description', []))
+        overall_description = title + ': ' + description
         overall_description = clean_text(overall_description)
-        item_description_dict[item] = overall_description
+        images_all = item_data.get('images', [])
+        images = []
+        for image in images_all:
+            images.append(image.get('large', ''))
+        item_metadata_dict[item] = {}
+        item_metadata_dict[item]['description'] = overall_description
+        item_metadata_dict[item]['images'] = images
 
-    data = {"user_interaction":user_item_preference_dict, "item_description":item_description_dict}
-    with open('./dataset/'+ dataset + '.json', 'w') as j:
+    data = {"interaction":interaction_dict, "metadata":item_metadata_dict}
+    with open('./dataset/'+ dataset + '/data.json', 'w') as j:
         json.dump(data, j)
 
 if __name__ == '__main__':
@@ -107,10 +85,11 @@ if __name__ == '__main__':
     # get_data('AMAZON_FASHION', rewrite=True)
     # get_data('Gift_Cards', rewrite=True)
     # get_data('Magazine_Subscriptions', rewrite=True)
-    # get_data('Movies_and_TV', rewrite=True)
+    get_data('Movies_and_TV', rewrite=True)
     # get_data('Books', rewrite=True)
     # get_data('Cell_Phones_and_Accessories', rewrite=True)
     # get_data('Electronics', rewrite=True)
-    get_data('Digital_Music', rewrite=True)
-    # get_data('Video_Games', rewrite=True)
-    # get_data('Kindle_Store', rewrite=True)
+    # get_data('Digital_Music', rewrite=True)
+    get_data('Video_Games', rewrite=True)
+    get_data('Kindle_Store', rewrite=True)
+    # get_data('CDs_and_Vinyl', rewrite=True)
