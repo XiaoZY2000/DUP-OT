@@ -9,3 +9,6 @@ dataset/Movies_and_TV/*
 
 dataset/Video_Games/*
 !dataset/Video_Games/.gitkeep
+
+dataset/Kindle_Store/*
+!dataset/Kindle_Store/.gitkeep
