@@ -1,0 +1,1 @@
+DUP-OT is a structure of cross-domain recommendation system which represents the users' preferences in GMM (Gaussian-Mixture Model) distributions over items' latent vectors rather than conventional discrete vectors and uitilizes Optimal Transport to transfer users' preference distributions from source domain to target domain to boost the target domain's efficiency.
